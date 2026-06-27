@@ -6,10 +6,25 @@ if (!process.env.VERCEL) {
   require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 }
 
-const FIVEM_SERVER_IP = process.env.FIVEM_SERVER_IP || '178.132.198.165:30120';
-const FIVEM_DISPLAY_IP = process.env.FIVEM_DISPLAY_IP || 'connect noir.rpfivem.online';
-const FIVEM_JOIN_CODE = process.env.FIVEM_JOIN_CODE || '98yjgee';
-const FIVEM_JOIN_URL = process.env.FIVEM_JOIN_URL || `https://cfx.re/join/${FIVEM_JOIN_CODE}`;
+const FIVEM_ENV = () => {
+  const joinCode = process.env.FIVEM_JOIN_CODE?.trim() || '';
+  return {
+    serverIp: process.env.FIVEM_SERVER_IP?.trim() || '',
+    displayIp: process.env.FIVEM_DISPLAY_IP?.trim() || '',
+    joinCode,
+    joinUrl: process.env.FIVEM_JOIN_URL?.trim() || (joinCode ? `https://cfx.re/join/${joinCode}` : ''),
+  };
+};
+
+function getPublicConfig() {
+  const env = FIVEM_ENV();
+  return {
+    displayIp: env.displayIp,
+    joinCode: env.joinCode,
+    joinUrl: env.joinUrl,
+    fivemConnect: env.joinCode ? `fivem://connect/cfx.re/join/${env.joinCode}` : '',
+  };
+}
 
 const RANKING_MODES = {
   ffa: {
@@ -51,6 +66,7 @@ function buildDisplayName(firstname, name) {
 }
 
 async function getServerStatus() {
+  const { serverIp, displayIp, joinCode, joinUrl } = FIVEM_ENV();
   const requestConfig = {
     timeout: 5000,
     headers: {
@@ -58,13 +74,28 @@ async function getServerStatus() {
     },
   };
 
-  const base = `http://${FIVEM_SERVER_IP}`;
+  const offlinePayload = {
+    online: false,
+    players: 0,
+    maxPlayers: 0,
+    displayIp,
+    joinCode,
+    joinUrl,
+  };
+
+  if (!serverIp && !joinCode) {
+    return offlinePayload;
+  }
+
+  const base = serverIp ? `http://${serverIp}` : null;
 
   const [playersRes, dynamicRes, infoRes, cfxRes] = await Promise.allSettled([
-    axios.get(`${base}/players.json`, requestConfig),
-    axios.get(`${base}/dynamic.json`, requestConfig),
-    axios.get(`${base}/info.json`, requestConfig),
-    axios.get(`https://servers-frontend.fivem.net/api/servers/single/${FIVEM_JOIN_CODE}`, requestConfig),
+    base ? axios.get(`${base}/players.json`, requestConfig) : Promise.reject(),
+    base ? axios.get(`${base}/dynamic.json`, requestConfig) : Promise.reject(),
+    base ? axios.get(`${base}/info.json`, requestConfig) : Promise.reject(),
+    joinCode
+      ? axios.get(`https://servers-frontend.fivem.net/api/servers/single/${joinCode}`, requestConfig)
+      : Promise.reject(),
   ]);
 
   const hasDirectSuccess = [playersRes, dynamicRes, infoRes].some(
@@ -77,14 +108,7 @@ async function getServerStatus() {
       : null;
 
   if (!hasDirectSuccess && !cfxData) {
-    return {
-      online: false,
-      players: 0,
-      maxPlayers: 0,
-      displayIp: FIVEM_DISPLAY_IP,
-      joinCode: FIVEM_JOIN_CODE,
-      joinUrl: FIVEM_JOIN_URL,
-    };
+    return offlinePayload;
   }
 
   const playersFromList =
@@ -116,9 +140,9 @@ async function getServerStatus() {
     online: true,
     players,
     maxPlayers,
-    displayIp: FIVEM_DISPLAY_IP,
-    joinCode: FIVEM_JOIN_CODE,
-    joinUrl: FIVEM_JOIN_URL,
+    displayIp,
+    joinCode,
+    joinUrl,
   };
 }
 
@@ -202,4 +226,5 @@ module.exports = {
   getServerStatus,
   getRanking,
   getDbConfig,
+  getPublicConfig,
 };
